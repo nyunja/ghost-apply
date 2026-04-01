@@ -21,3 +21,8 @@ resumes/
 .DS_Store
 Thumbs.db
 *.log
+
+# Scratch / temp
+tmp/
+test_explorer.js
+test-parser.js
