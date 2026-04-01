@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime data — stored in ~/.jobtailor/, not the repo
+profile.json
+master-profile.json
+
+# Resumes — personal files, never commit
+resumes/
+
+# Build / OS
+.DS_Store
+Thumbs.db
+*.log
