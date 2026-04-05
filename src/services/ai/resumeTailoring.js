@@ -4,6 +4,7 @@ const HUMAN_STYLE = `Writing style rules:
 - Write like a confident human professional, not an AI.
 - Vary sentence length.
 - No em-dashes (—). Use commas or restructure instead.
+- No asterix (*) in the output.
 - No citations or reference markers like [1] or [4].
 - Banned words: "delve", "leverage", "spearhead", "passionate", "dynamic", "synergy", "utilize", "robust", "seamlessly", "cutting-edge", "innovative", "transformative".
 - Ground every claim in the candidate's actual experience — no invented details.`;
@@ -12,7 +13,7 @@ export async function tailorCV(analysis, profile) {
   const raw = await callAI(
     `You are a professional CV writer. Return ONLY valid JSON with NO markdown or backticks:
 {
-  "headline": "concise professional title, max 8 words, no keyword stuffing — e.g. 'Staff Engineer, Go & Kubernetes'",
+  "headline": "concise professional title, max 5 words, no keyword stuffing — e.g. 'Staff Engineer, Go & Kubernetes'",
   "summary": "3-sentence tailored professional summary, plain text no markdown",
   "injectedBullets": [
     {

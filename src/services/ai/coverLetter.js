@@ -4,6 +4,7 @@ const HUMAN_STYLE = `Writing style rules (apply to ALL prose output):
 - Write like a confident human professional, not an AI.
 - Vary sentence length — mix short punchy sentences with longer ones.
 - No em-dashes (—). Use commas, periods, or restructure instead.
+- No asterix (*) in the output.
 - No citations, footnotes, or reference markers like [1] or [4].
 - Banned words/phrases: "delve", "leverage", "spearhead", "passionate", "dynamic", "synergy", "utilize", "robust", "seamlessly", "cutting-edge", "innovative", "transformative", "it's worth noting", "in conclusion".
 - No filler openers like "I am excited to...", "I am writing to...".
