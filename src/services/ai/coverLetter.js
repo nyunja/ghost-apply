@@ -38,7 +38,7 @@ Rules:
 - opening: 2-3 sentences.
 - body: exactly 3 paragraphs as strings in the array.
 - closing: 2 sentences.
-- NO markdown, NO explanation outside JSON.
+- CRITICAL: You MUST output ONLY valid JSON. NEVER output plain text, markdown, or conversational filler. Any text outside the JSON object will cause a system crash.
 ${HUMAN_STYLE}`,
     `Candidate: ${name} | ${location}
 Role: ${role} at ${company}
