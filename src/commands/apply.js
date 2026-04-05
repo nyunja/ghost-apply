@@ -18,80 +18,127 @@ import { cmdGeneratePdf, cmdGenerateCoverLetterPdf } from "./profile.js";
 // ── Core per-job pipeline ─────────────────────────────────────────────────────
 // Returns "applied" | "skipped" | "error"
 export async function applySingleJob(url, profile, opts = {}) {
-  const { dryRun = false, resumePath = null, proxyOpts = null, cvFilePath = null } = opts;
+  const { dryRun = false, resumePath = null, proxyOpts = null, cvFilePath = null, reuseDir = null } = opts;
 
   let tailoredCV, analysis, manifest, jd;
-
-  if (cvFilePath) {
-    try {
-      tailoredCV = JSON.parse(fs.readFileSync(path.resolve(cvFilePath), "utf8"));
-      console.log(fmt.ok("Loaded tailored CV from " + cvFilePath));
-    } catch {
-      console.log(fmt.err("Could not read CV file: " + cvFilePath));
-      return "error";
-    }
-  } else {
-    const s0 = spinner();
-    s0.start("Exploring job listing...");
-    try {
-      manifest = await exploreJob(url);
-      jd = manifest.jd;
-      s0.stop(fmt.ok(`Explored ${jd.length} chars + ${manifest.steps.length} steps from ${new URL(url).hostname}`));
-    } catch (err) {
-      s0.stop(fmt.err("Exploration failed: " + err.message));
-      return "error";
-    }
-
-    const s = spinner();
-    s.start(`Analyzing JD + tailoring CV ${providerLabel()}...`);
-    try {
-      analysis   = await analyzeJD(jd, profile);
-      tailoredCV = await tailorCV(analysis, profile);
-      s.stop(fmt.ok("Match: " + analysis.matchScore + "%"));
-    } catch (err) {
-      s.stop(fmt.err("AI step failed: " + err.message));
-      return "error";
-    }
-
-    printAnalysis(analysis);
-
-    if (analysis.matchScore < 40) {
-      const go = await confirm({ message: `Low match (${analysis.matchScore}%). Apply anyway?` });
-      if (!go) return "skipped";
-    }
-  }
-
-  printCV(tailoredCV);
-
-  // Save application files
-  const baseDir = path.join(os.homedir(), ".jobtailor", "applications");
-  const ts      = Date.now();
-  const { dirBase, pdfBase } = buildFilename(profile, analysis, null, ts);
-  const appDir  = path.join(baseDir, dirBase || `job-${ts}`);
-  fs.mkdirSync(appDir, { recursive: true });
-
-  fs.writeFileSync(path.join(appDir, "jd.json"), JSON.stringify({
-    url, company: analysis?.company, role: analysis?.jobTitle,
-    timestamp: new Date(ts).toISOString(), analysis
-  }, null, 2));
-
-  const cvJsonPath = path.join(appDir, `${pdfBase}_CV.json`);
-  fs.writeFileSync(cvJsonPath, JSON.stringify(tailoredCV, null, 2));
-
-  // Cover letter + PDFs
   let coverLetter = null;
-  const s1 = spinner();
-  s1.start(`Generating cover letter ${providerLabel()}...`);
-  try {
-    const clData    = await generateCoverLetter(analysis, profile, tailoredCV);
-    coverLetter     = clData;
-    const clJsonPath = path.join(appDir, `${pdfBase}_Cover-Letter.json`);
-    fs.writeFileSync(clJsonPath, JSON.stringify(clData, null, 2));
-    s1.stop(fmt.ok("Cover letter ready."));
-    await cmdGeneratePdf(cvJsonPath, path.join(appDir, `${pdfBase}_CV.pdf`));
-    await cmdGenerateCoverLetterPdf(clJsonPath, path.join(appDir, `${pdfBase}_Cover-Letter.pdf`));
-  } catch (err) {
-    s1.stop(fmt.warn("Cover letter failed: " + err.message.split("\n")[0]));
+  let preAnswers = [];
+  let appDir = null;
+
+  if (reuseDir && fs.existsSync(reuseDir)) {
+    console.log(fmt.info(`Reusing previously generated files from: ${reuseDir}`));
+    
+    // Find CV JSON
+    const cvFile = fs.readdirSync(reuseDir).find(f => f.endsWith('_CV.json'));
+    if (cvFile) {
+      tailoredCV = JSON.parse(fs.readFileSync(path.join(reuseDir, cvFile), 'utf8'));
+    } else {
+      console.log(fmt.err("No _CV.json found in reuse directory"));
+      return "error";
+    }
+
+    // Find cover letter JSON
+    const clFile = fs.readdirSync(reuseDir).find(f => f.endsWith('_Cover-Letter.json'));
+    if (clFile) {
+      coverLetter = JSON.parse(fs.readFileSync(path.join(reuseDir, clFile), 'utf8'));
+    }
+
+    // Load preAnswers if exist
+    const answersFile = path.join(reuseDir, 'application-responses.json');
+    if (fs.existsSync(answersFile)) {
+      const responses = JSON.parse(fs.readFileSync(answersFile, 'utf8'));
+      preAnswers = responses.questionResponses?.mappedAnswers || [];
+    }
+    
+    appDir = reuseDir;
+  } else {
+    if (cvFilePath) {
+      try {
+        tailoredCV = JSON.parse(fs.readFileSync(path.resolve(cvFilePath), "utf8"));
+        console.log(fmt.ok("Loaded tailored CV from " + cvFilePath));
+      } catch {
+        console.log(fmt.err("Could not read CV file: " + cvFilePath));
+        return "error";
+      }
+    } else {
+      const s0 = spinner();
+      s0.start("Exploring job listing...");
+      try {
+        manifest = await exploreJob(url);
+        jd = manifest.jd;
+        s0.stop(fmt.ok(`Explored ${jd.length} chars + ${manifest.steps.length} steps from ${new URL(url).hostname}`));
+      } catch (err) {
+        s0.stop(fmt.err("Exploration failed: " + err.message));
+        return "error";
+      }
+
+      const s = spinner();
+      s.start(`Analyzing JD + tailoring CV ${providerLabel()}...`);
+      try {
+        analysis   = await analyzeJD(jd, profile);
+        tailoredCV = await tailorCV(analysis, profile);
+        s.stop(fmt.ok("Match: " + analysis.matchScore + "%"));
+      } catch (err) {
+        s.stop(fmt.err("AI step failed: " + err.message));
+        return "error";
+      }
+
+      printAnalysis(analysis);
+
+      if (analysis.matchScore < 40) {
+        const go = await confirm({ message: `Low match (${analysis.matchScore}%). Apply anyway?` });
+        if (!go) return "skipped";
+      }
+    }
+
+    printCV(tailoredCV);
+
+    // Save application files
+    const baseDir = path.join(os.homedir(), ".jobtailor", "applications");
+    const ts      = Date.now();
+    const { dirBase, pdfBase } = buildFilename(profile, analysis, null, ts);
+    appDir  = path.join(baseDir, dirBase || `job-${ts}`);
+    fs.mkdirSync(appDir, { recursive: true });
+
+    fs.writeFileSync(path.join(appDir, "jd.json"), JSON.stringify({
+      url, company: analysis?.company, role: analysis?.jobTitle,
+      timestamp: new Date(ts).toISOString(), analysis
+    }, null, 2));
+
+    const cvJsonPath = path.join(appDir, `${pdfBase}_CV.json`);
+    fs.writeFileSync(cvJsonPath, JSON.stringify(tailoredCV, null, 2));
+
+    // Cover letter + PDFs
+    const s1 = spinner();
+    s1.start(`Generating cover letter ${providerLabel()}...`);
+    try {
+      const clData    = await generateCoverLetter(analysis, profile, tailoredCV);
+      coverLetter     = clData;
+      const clJsonPath = path.join(appDir, `${pdfBase}_Cover-Letter.json`);
+      fs.writeFileSync(clJsonPath, JSON.stringify(clData, null, 2));
+      s1.stop(fmt.ok("Cover letter ready."));
+      await cmdGeneratePdf(cvJsonPath, path.join(appDir, `${pdfBase}_CV.pdf`));
+      await cmdGenerateCoverLetterPdf(clJsonPath, path.join(appDir, `${pdfBase}_Cover-Letter.pdf`));
+    } catch (err) {
+      s1.stop(fmt.warn("Cover letter failed: " + err.message.split("\n")[0]));
+    }
+
+    // Pre-fetch form answers
+    if (manifest?.steps.length) {
+      const formQs = getQuestionsFromManifest(manifest);
+      if (formQs.length) {
+        const s3 = spinner();
+        s3.start(`Generating answers to ${formQs.length} form question(s) ${providerLabel()}...`);
+        try {
+          const responses = await answerFormQuestions(formQs, profile, tailoredCV);
+          preAnswers = responses.questionResponses?.mappedAnswers || [];
+          s3.stop(fmt.ok(`Pre-generated ${preAnswers.length} answer(s).`));
+          fs.writeFileSync(path.join(appDir, "application-responses.json"), JSON.stringify(responses, null, 2));
+        } catch (err) {
+          s3.stop(fmt.warn("Answer generation failed: " + err.message.split("\n")[0]));
+        }
+      }
+    }
   }
 
   if (coverLetter?.coverLetter?.content) {
@@ -99,28 +146,11 @@ export async function applySingleJob(url, profile, opts = {}) {
     note(pc.cyan([opening, ...body, closing].join("\n\n")), "📄 Cover Letter Preview");
   }
 
-  // Pre-fetch form answers
-  let preAnswers = [];
-  if (manifest?.steps.length) {
-    const formQs = getQuestionsFromManifest(manifest);
-    if (formQs.length) {
-      const s3 = spinner();
-      s3.start(`Generating answers to ${formQs.length} form question(s) ${providerLabel()}...`);
-      try {
-        const responses = await answerFormQuestions(formQs, profile, tailoredCV);
-        preAnswers = responses.questionResponses?.mappedAnswers || [];
-        s3.stop(fmt.ok(`Pre-generated ${preAnswers.length} answer(s).`));
-        fs.writeFileSync(path.join(appDir, "application-responses.json"), JSON.stringify(responses, null, 2));
-        if (preAnswers.length) {
-          const qaLines = preAnswers
-            .map(({ question, answer }) => `${pc.dim("Q:")} ${question.label}\n  ${pc.cyan("A:")} ${answer}`)
-            .join("\n");
-          note(qaLines, "📋 Form Answers");
-        }
-      } catch (err) {
-        s3.stop(fmt.warn("Answer generation failed: " + err.message.split("\n")[0]));
-      }
-    }
+  if (preAnswers.length) {
+    const qaLines = preAnswers
+      .map(({ question, answer }) => `${pc.dim("Q:")} ${question.label}\n  ${pc.cyan("A:")} ${answer}`)
+      .join("\n");
+    note(qaLines, "📋 Form Answers");
   }
 
   // Human Guard
@@ -162,7 +192,9 @@ export async function applySingleJob(url, profile, opts = {}) {
     console.log(fmt.ok("Logged to application tracker."));
   }
 
-  return result.dryRun ? "skipped" : "applied";
+  if (!result.success) return "error";
+  if (result.dryRun)   return "dry-run";
+  return "applied";
 }
 
 // ── Single job command ────────────────────────────────────────────────────────
@@ -183,6 +215,17 @@ export async function cmdApply() {
   const resumePath = resumeIdx !== -1 ? args[resumeIdx + 1] : null;
   const proxyIdx   = args.indexOf("--proxy");
   const proxyStr   = proxyIdx  !== -1 ? args[proxyIdx  + 1] : null;
+  
+  const reuseIdx = args.indexOf("--reuse");
+  let reuseDir = null;
+  if (reuseIdx !== -1 && args[reuseIdx + 1]) {
+    reuseDir = path.resolve(args[reuseIdx + 1]);
+    if (!fs.existsSync(reuseDir)) {
+      console.log(fmt.err(`Reuse directory not found: ${reuseDir}`));
+      return;
+    }
+  }
+
   const cvFileIdx  = args.indexOf("--cv");
   const cvFilePath = cvFileIdx !== -1 ? args[cvFileIdx + 1] : null;
 
@@ -204,10 +247,11 @@ export async function cmdApply() {
     } catch { console.log(fmt.warn("Could not parse proxy URL — ignoring")); }
   }
 
-  const status = await applySingleJob(url, profile, { dryRun, resumePath, proxyOpts, cvFilePath });
+  const status = await applySingleJob(url, profile, { dryRun, resumePath, proxyOpts, cvFilePath, reuseDir });
   outro(
-    status === "applied" ? pc.cyan("Application submitted! Good luck!") :
-    status === "skipped" ? pc.yellow("Skipped.") :
+    status === "dry-run"  ? pc.cyan("Dry run complete — check ~/.jobtailor/applications/ to review.") :
+    status === "applied"  ? pc.cyan("Application submitted! Good luck!") :
+    status === "skipped"  ? pc.yellow("Skipped.") :
     pc.red("Finished with errors — check last_action.png")
   );
 }
@@ -261,7 +305,7 @@ export async function cmdBatch() {
 
     const status = await applySingleJob(url, profile, { dryRun, resumePath });
 
-    stats[status === "applied" ? "applied" : status === "skipped" ? "skipped" : "errors"]++;
+    stats[status === "applied" ? "applied" : status === "skipped" || status === "dry-run" ? "skipped" : "errors"]++;
 
     if (i < lines.length - 1) {
       const next = await confirm({ message: "Continue to next job?" });

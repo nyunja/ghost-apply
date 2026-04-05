@@ -9,6 +9,7 @@ import { tailorCV } from "../services/ai/resumeTailoring.js";
 import { generateCoverLetter } from "../services/ai/coverLetter.js";
 import { resolveActiveProfile, requireApiKey, providerLabel, readJDFromFile, buildFilename } from "../utils/cliHelpers.js";
 import { scrapeJD } from "../lib/browser/scraper.js";
+import { safeExtractJD } from "../utils/jdValidator-agnostic.js";
 import { isBlacklisted, alreadyApplied, recordApplication, addBlacklist, checkDailyLimit } from "../services/tracker.js";
 import { banner, fmt, printAnalysis, printCV } from "../utils/display.js";
 import { cmdGeneratePdf, cmdGenerateCoverLetterPdf } from "./profile.js";
@@ -49,7 +50,12 @@ export async function cmdAnalyze() {
     const s2 = spinner();
     s2.start("Scraping job description (stealth browser)...");
     try {
-      jdText = await scrapeJD(jobUrl);
+      const result = await safeExtractJD(scrapeJD, jobUrl, { debug: true });
+      if (!result.success) {
+        s2.stop(fmt.err(`Scrape failed: ${result.error}`));
+        process.exit(1);
+      }
+      jdText = result.data;
       s2.stop(fmt.ok(`Scraped ${jdText.length} characters from ${new URL(jobUrl).hostname}`));
     } catch (err) {
       s2.stop(fmt.err("Scrape failed: " + err.message));

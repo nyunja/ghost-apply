@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
-//  scraper.js — Stealth JD scraper
-//  Uses playwright-extra + stealth plugin to fetch job descriptions
-//  from any URL without triggering bot-detection.
+//  scraper-agnostic.js — Platform-Agnostic JD Scraper
+//  Uses intelligent content detection instead of hardcoded selectors.
+//  Works with hybrid approach: generic scraping → AI discovery → rule cache
 // ─────────────────────────────────────────────
 
 import { chromium } from "playwright-extra";
@@ -9,93 +9,220 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
 chromium.use(StealthPlugin());
 
-// Platform-specific selectors ordered by specificity
-const PLATFORM_SELECTORS = [
-  // LinkedIn
-  { host: "linkedin.com",  selectors: [".description__text", ".job-description", ".jobs-description"] },
-  // Greenhouse
-  { host: "greenhouse.io", selectors: ["#content", ".job-description", ".job__description"] },
-  // Lever
-  { host: "lever.co",      selectors: [".posting-description", ".section-wrapper .content"] },
-  // Indeed
-  { host: "indeed.com",    selectors: ["#jobDescriptionText", ".jobsearch-jobDescriptionText"] },
-  // Seek
-  { host: "seek.com",      selectors: ['[data-automation="jobDescription"]', ".FYwKg"] },
-  // Workday
-  { host: "myworkdayjobs", selectors: ["[data-automation-id='jobPostingDescription']", ".css-1t0bwq8"] },
-  // Workable
-  { host: "workable.com",  selectors: [".job-description", "[class*='description']"] },
-  // Ashby
-  { host: "ashbyhq.com",   selectors: [".ashby-job-posting-brief-description", "[class*='job']"] },
-];
-
-// Generic fallbacks tried if no platform match
-const GENERIC_SELECTORS = [
+// Minimal generic selectors as final fallbacks only
+const FALLBACK_SELECTORS = [
   "[class*='job-description']",
   "[class*='jobDescription']",
   "[id*='job-description']",
   "[id*='jobDescription']",
-  "[class*='posting-description']",
-  "[class*='description']",
+  "[class*='posting']",
   "article",
   "main",
   "[role='main']",
 ];
 
 /**
- * Stateless JD extractor that works on an already-open page.
- * Tried by the Unified Explorer to avoid redundant browser launches.
- *
- * @param {import("playwright").Page} page
- * @param {{ debug?: boolean }} [opts]
- * @returns {Promise<string>}
+ * Intelligently waits for page content to load by monitoring DOM changes.
+ * Works for any platform without hardcoded rules.
+ * 
+ * @param {Page} page - Playwright page object
+ * @param {number} timeout - Max wait time in ms
+ * @param {boolean} debug - Enable debug logging
+ * @returns {Promise<boolean>} - true if content loaded, false on timeout
+ */
+export async function waitForContentToLoad(page, timeout = 10000, debug = false) {
+  const startTime = Date.now();
+  const checkInterval = 300; // Check every 300ms for efficiency
+  const minContentLength = 300; // Minimum meaningful content threshold
+  
+  let lastContentLength = 0;
+  let stableChecks = 0; // Count of consecutive checks with no content change
+  const stabilityThreshold = 3; // 3 checks = ~900ms of stable content = loaded
+  
+  if (debug) console.error("[scraper] waiting for content to load...");
+
+  while (Date.now() - startTime < timeout) {
+    const { contentLength, frameCount } = await page.evaluate(() => {
+      let totalLength = document.body.innerText.trim().length;
+      return {
+        contentLength: totalLength,
+        frameCount: window.frames.length
+      };
+    });
+
+    // Check if we have meaningful content
+    if (contentLength >= minContentLength) {
+      // Content exists, check if it's stable (not still loading)
+      if (contentLength === lastContentLength) {
+        stableChecks++;
+        if (debug) console.error(`[scraper] content stable (${stableChecks}/${stabilityThreshold}): ${contentLength} chars`);
+        
+        if (stableChecks >= stabilityThreshold) {
+          if (debug) console.error(`[scraper] ✓ content loaded (${contentLength} chars)`);
+          return true;
+        }
+      } else {
+        stableChecks = 0; // Reset if content changed
+        if (debug) console.error(`[scraper] content growing: ${contentLength} chars`);
+      }
+      lastContentLength = contentLength;
+    } else {
+      if (debug && contentLength > 0) {
+        console.error(`[scraper] minimal content: ${contentLength} chars (waiting for more...)`);
+      }
+      stableChecks = 0;
+      lastContentLength = 0;
+    }
+
+    await page.waitForTimeout(checkInterval);
+  }
+
+  if (debug) console.error(`[scraper] timeout waiting for content (got ${lastContentLength} chars)`);
+  return false;
+}
+
+/**
+ * Attempts to extract content from various contexts (main page, iframes, shadow DOM)
+ * without relying on platform-specific selectors.
  */
 export async function extractJDFromPage(page, opts = {}) {
-  const { debug = false } = opts;
-  const url = page.url();
-
-  // Determine selectors to try first based on hostname
-  const hostname = new URL(url).hostname;
-  const platform = PLATFORM_SELECTORS.find((p) => hostname.includes(p.host));
-  const prioritySelectors = platform ? platform.selectors : [];
-  const allSelectors = [...prioritySelectors, ...GENERIC_SELECTORS];
+  const { debug = false, useFallbackSelectors = true } = opts;
 
   let extracted = "";
 
-  // Try selectors in order; accept the first one with enough text
-  for (const sel of allSelectors) {
-    try {
-      const el = page.locator(sel).first();
-      const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
-      if (!visible) continue;
-      const txt = (await el.innerText({ timeout: 3000 })).trim();
-      if (txt.length > 200) {
-        extracted = txt;
-        if (debug) console.error(`[scraper] matched selector: ${sel}`);
-        break;
-      }
-    } catch { /* try next */ }
+  // Strategy 1: Try to find largest text block on main page
+  if (debug) console.error("[scraper] strategy 1: checking main page content...");
+  
+  extracted = await page.evaluate(() => {
+    // Get the largest continuous text block
+    const body = document.body;
+    if (!body) return "";
+    
+    const text = body.innerText.trim();
+    return text.length > 200 ? text : "";
+  });
+
+  if (extracted && extracted.length > 200) {
+    if (debug) console.error(`[scraper] ✓ found on main page: ${extracted.length} chars`);
+    return cleanText(extracted);
   }
 
-  // Last-resort: grab full body text
-  if (!extracted) {
-    if (debug) console.error("[scraper] falling back to body text");
-    extracted = (await page.locator("body").innerText({ timeout: 5000 })).trim();
+  // Strategy 2: Check iframes
+  if (debug) console.error("[scraper] strategy 2: scanning iframes...");
+  
+  const frames = page.frames();
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i];
+    if (frame === page.mainFrame()) continue;
+
+    try {
+      const frameText = await frame.evaluate(() => {
+        const text = document.body?.innerText?.trim() || "";
+        return text.length > 200 ? text : "";
+      });
+
+      if (frameText && frameText.length > 200) {
+        if (debug) console.error(`[scraper] ✓ found in iframe ${i}: ${frameText.length} chars`);
+        extracted = frameText;
+        break;
+      }
+    } catch (e) {
+      // Frame might be cross-origin or not accessible
+      if (debug) console.error(`[scraper] iframe ${i} not accessible`);
+    }
   }
+
+  if (extracted && extracted.length > 200) {
+    return cleanText(extracted);
+  }
+
+  // Strategy 3: Try shadow DOM inspection
+  if (debug) console.error("[scraper] strategy 3: checking shadow DOM...");
+  
+  extracted = await page.evaluate(() => {
+    function walkShadowDOM(node, depth = 0, maxDepth = 5) {
+      if (depth > maxDepth) return "";
+      let content = node.textContent || "";
+      
+      if (node.shadowRoot) {
+        for (const child of node.shadowRoot.children) {
+          content += " " + walkShadowDOM(child, depth + 1, maxDepth);
+        }
+      }
+      
+      if (node.children) {
+        for (const child of node.children) {
+          content += " " + walkShadowDOM(child, depth + 1, maxDepth);
+        }
+      }
+      
+      return content;
+    }
+
+    const root = document.querySelector("main") || 
+                 document.querySelector("article") || 
+                 document.body;
+    
+    const text = walkShadowDOM(root).trim();
+    return text.length > 200 ? text : "";
+  });
+
+  if (extracted && extracted.length > 200) {
+    if (debug) console.error(`[scraper] ✓ found in shadow DOM: ${extracted.length} chars`);
+    return cleanText(extracted);
+  }
+
+  // Strategy 4: Use fallback selectors (minimal set)
+  if (useFallbackSelectors) {
+    if (debug) console.error("[scraper] strategy 4: trying fallback selectors...");
+    
+    for (const selector of FALLBACK_SELECTORS) {
+      try {
+        const el = page.locator(selector).first();
+        const visible = await el.isVisible({ timeout: 500 }).catch(() => false);
+        
+        if (visible) {
+          const text = await el.innerText({ timeout: 1000 }).catch(() => "");
+          if (text && text.trim().length > 200) {
+            if (debug) console.error(`[scraper] ✓ matched fallback selector: ${selector}`);
+            extracted = text;
+            break;
+          }
+        }
+      } catch (e) {
+        // Try next selector
+      }
+    }
+
+    if (extracted && extracted.length > 200) {
+      return cleanText(extracted);
+    }
+  }
+
+  // Fallback: Return whatever content exists
+  if (debug) console.error("[scraper] all strategies exhausted, returning available content");
+  
+  extracted = await page.evaluate(() => {
+    return document.body?.innerText?.trim() || "";
+  });
 
   return cleanText(extracted);
 }
 
 /**
- * Scrape a job description from the given URL using a stealth browser.
- * Returns the extracted text, or throws if extraction fails.
- *
+ * Main scraping function - platform agnostic.
+ * Uses intelligent waiting instead of hardcoded waits.
+ * 
  * @param {string} url
- * @param {{ timeout?: number, debug?: boolean }} [opts]
+ * @param {{ timeout?: number, debug?: boolean, maxWait?: number }} [opts]
  * @returns {Promise<string>}
  */
 export async function scrapeJD(url, opts = {}) {
-  const { timeout = 30_000, debug = false } = opts;
+  const { 
+    timeout = 30_000,      // Total timeout for page.goto
+    debug = false,
+    maxWait = 15_000       // Max time to wait for content to load
+  } = opts;
 
   const browser = await chromium.launch({
     headless: true,
@@ -111,17 +238,30 @@ export async function scrapeJD(url, opts = {}) {
       extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
     });
 
+    // Block resource types that slow down loading
     await context.route("**/*", (route) => {
       const rt = route.request().resourceType();
-      if (["image", "font", "media"].includes(rt)) return route.abort();
+      if (["image", "font", "media", "stylesheet"].includes(rt)) {
+        return route.abort();
+      }
       return route.continue();
     });
 
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+    
+    if (debug) console.error(`[scraper] navigating to: ${url}`);
+    
+    await page.goto(url, { 
+      waitUntil: "domcontentloaded", 
+      timeout 
+    });
 
-    // Give JS-rendered content a moment to paint
-    await page.waitForTimeout(2500);
+    // Intelligent wait for content (instead of fixed timeout)
+    const contentReady = await waitForContentToLoad(page, maxWait, debug);
+    
+    if (!contentReady && debug) {
+      console.error("[scraper] ⚠ content wait timed out, attempting extraction anyway");
+    }
 
     const extracted = await extractJDFromPage(page, { debug });
 
@@ -140,8 +280,7 @@ function cleanText(raw) {
   return raw
     .split("\n")
     .map((l) => l.trim())
-    .filter((l, i, arr) => l || (arr[i - 1] !== ""))   // collapse consecutive blanks
+    .filter((l, i, arr) => l || (arr[i - 1] !== ""))
     .join("\n")
     .trim();
 }
-

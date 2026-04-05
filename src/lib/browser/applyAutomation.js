@@ -11,39 +11,40 @@
 // ─────────────────────────────────────────────
 
 import { chromium } from "playwright";
-import fs   from "fs";
+import fs from "fs";
 import path from "path";
-import os   from "os";
+import os from "os";
 import { answerFormQuestions } from "../../services/ai/formQuestions.js";
 import { getSelector, setSelector } from "../../services/selectors.js";
 import { identifyTrigger } from "../../services/ai/discovery.js";
 import { scanFields, findClickableCandidates, isStandardField } from "../../utils/browserUtils.js";
+import { clickIntent } from './explorer.js'
 
 // ── Per-field keyword map for dynamic discovery ────────────────────────────
 // Each entry lists label/placeholder keywords to recognise that field on any site.
 const FIELD_KEYWORDS = {
-  full_name:   ["full name", "your name", "nom complet"],
-  first_name:  ["first name", "given name", "fname", "forename"],
-  last_name:   ["last name", "surname", "family name", "lname"],
-  email:       ["email", "e-mail", "electronic mail"],
-  phone:       ["phone", "mobile", "cell", "telephone", "tel"],
-  location:    ["city", "location", "where are you based", "current location"],
-  linkedin:    ["linkedin", "linkedin url", "linkedin profile", "linkedin.com"],
-  github:      ["github", "github url", "github profile", "github.com", "code repository"],
-  website:     ["website", "portfolio", "personal url", "personal site", "online portfolio"],
-  cover:       ["cover letter", "covering letter", "motivation", "why do you want"],
+  full_name: ["full name", "your name", "nom complet"],
+  first_name: ["first name", "given name", "fname", "forename"],
+  last_name: ["last name", "surname", "family name", "lname"],
+  email: ["email", "e-mail", "electronic mail"],
+  phone: ["phone", "mobile", "cell", "telephone", "tel"],
+  location: ["city", "location", "where are you based", "current location"],
+  linkedin: ["linkedin", "linkedin url", "linkedin profile", "linkedin.com"],
+  github: ["github", "github url", "github profile", "github.com", "code repository"],
+  website: ["website", "portfolio", "personal url", "personal site", "online portfolio"],
+  cover: ["cover letter", "covering letter", "motivation", "why do you want"],
 };
 
-const DATA_DIR    = path.join(os.homedir(), ".jobtailor");
-const AUTH_STATE  = path.join(DATA_DIR, "auth_state.json");
-let SCREENSHOTS   = path.join(DATA_DIR, "screenshots");
+const DATA_DIR = path.join(os.homedir(), ".jobtailor");
+const AUTH_STATE = path.join(DATA_DIR, "auth_state.json");
+let SCREENSHOTS = path.join(DATA_DIR, "screenshots");
 const LAST_ACTION = path.join(DATA_DIR, "last_action.png");
 
-fs.mkdirSync(DATA_DIR,    { recursive: true });
+fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(SCREENSHOTS, { recursive: true });
 
 // ── Utilities ────────────────────────────────
-const sleep       = (ms) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const randomDelay = (min, max) => Math.floor(Math.random() * (max - min)) + min;
 
 // ── Shared focus helper ───────────────────────
@@ -53,9 +54,9 @@ async function focusLocator(locator) {
     await locator.click({ timeout: 5000 });
   } catch {
     // Overlay intercepting — focus via JS
-    await locator.evaluate(el => el.focus()).catch(() => {});
+    await locator.evaluate(el => el.focus()).catch(() => { });
   }
-  await locator.clear().catch(() => {});
+  await locator.clear().catch(() => { });
 }
 
 // ── Human-like typing — short fields ─────────
@@ -82,7 +83,7 @@ async function humanType(locator, text) {
 async function humanTypeCompose(locator, text) {
   await focusLocator(locator);
   for (let i = 0; i < text.length; i++) {
-    const ch   = text[i];
+    const ch = text[i];
     const next = text[i + 1] ?? "";
 
     // 3% typo rate — lower than short fields (you've drafted this already)
@@ -122,9 +123,9 @@ async function fillHiddenInput(page, selector, value) {
     // Use React/Vue-compatible setter so frameworks detect the change
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     if (setter) setter.call(el, val); else el.value = val;
-    el.dispatchEvent(new Event("input",  { bubbles: true }));
+    el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.dispatchEvent(new Event("blur",   { bubbles: true }));
+    el.dispatchEvent(new Event("blur", { bubbles: true }));
     return true;
   }, { sel: selector, val: value });
 }
@@ -158,7 +159,7 @@ export function clearAuthState() {
 async function launchBrowser(opts = {}) {
   const launchOpts = {
     headless: opts.headless ?? false,  // visible by default so you can intervene
-    slowMo:   opts.slowMo  ?? 80,
+    slowMo: opts.slowMo ?? 80,
     args: [
       "--no-sandbox",
       "--disable-blink-features=AutomationControlled",
@@ -168,7 +169,7 @@ async function launchBrowser(opts = {}) {
 
   if (opts.proxy) {
     launchOpts.proxy = {
-      server:   opts.proxy.server,
+      server: opts.proxy.server,
       username: opts.proxy.username,
       password: opts.proxy.password,
     };
@@ -177,9 +178,9 @@ async function launchBrowser(opts = {}) {
   const browser = await chromium.launch(launchOpts);
 
   const contextOpts = {
-    viewport:   { width: 1280 + randomDelay(0, 80), height: 800 + randomDelay(0, 40) },
-    userAgent:  opts.userAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    locale:     "en-US",
+    viewport: { width: 1280 + randomDelay(0, 80), height: 800 + randomDelay(0, 40) },
+    userAgent: opts.userAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    locale: "en-US",
     timezoneId: opts.timezone ?? "America/New_York",
   };
 
@@ -190,7 +191,7 @@ async function launchBrowser(opts = {}) {
   }
 
   const context = await browser.newContext(contextOpts);
-  const page    = await context.newPage();
+  const page = await context.newPage();
 
   // Skip images/fonts — faster navigation
   await page.route("**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf}", r => r.abort());
@@ -276,7 +277,7 @@ async function fillWithDiscovery(page, fieldName, candidates, value, hostname, c
       for (const sel of cands) {
         const el = document.querySelector(sel);
         if (el && el.offsetParent !== null) {
-          if (el.id)   return `#${el.id}`;
+          if (el.id) return `#${el.id}`;
           if (el.name) return `[name="${el.name}"]`;
           return sel; // fall back to whatever matched
         }
@@ -320,8 +321,8 @@ async function fillWithDiscovery(page, fieldName, candidates, value, hostname, c
       const label = getLabel(el);
       if (kws.some(k => label.includes(k))) {
         // Build a precise selector — prefer id, then name
-        if (el.id)   return { sel: `#${CSS.escape(el.id)}`,       label };
-        if (el.name) return { sel: `[name="${el.name}"]`,        label };
+        if (el.id) return { sel: `#${CSS.escape(el.id)}`, label };
+        if (el.name) return { sel: `[name="${el.name}"]`, label };
       }
     }
     return null;
@@ -344,7 +345,7 @@ async function fillWithDiscovery(page, fieldName, candidates, value, hostname, c
 }
 
 const UPLOAD_KEYWORDS = {
-  resume:       ["resume", "cv", "curriculum", "upload your resume", "attach resume"],
+  resume: ["resume", "cv", "curriculum", "upload your resume", "attach resume"],
   cover_letter: ["cover letter", "covering letter", "cover", "letter of motivation"],
 };
 
@@ -426,7 +427,7 @@ async function uploadFile(page, fieldName, filePath, hostname, log) {
       if (el.disabled) continue;
       const label = getUploadLabel(el);
       if (kws.some(k => label.includes(k))) {
-        if (el.id)   return { sel: `#${CSS.escape(el.id)}`, label };
+        if (el.id) return { sel: `#${CSS.escape(el.id)}`, label };
         if (el.name) return { sel: `[name="${el.name}"]`, label };
         // Build nth-of-type selector as fallback
         const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
@@ -459,9 +460,9 @@ async function applyAnswers(page, answeredQuestions, log) {
   for (const { question, answer } of answeredQuestions) {
     if (!answer || /^(not provided|n\/a)$/i.test(answer.trim())) continue;
     const { id, type, name, options, label } = question;
-    const byId   = id   ? `#${id}`           : null;
-    const byName = name ? `[name="${name}"]`  : null;
-    const sel    = byId || byName;
+    const byId = id ? `#${id}` : null;
+    const byName = name ? `[name="${name}"]` : null;
+    const sel = byId || byName;
     if (!sel) continue;
 
     try {
@@ -486,7 +487,7 @@ async function applyAnswers(page, answeredQuestions, log) {
           // does nothing.  Click the [data-ui="option"] wrapper div instead.
           // Fall back to the <label> wrapping the input, then a JS .click() on the input.
           const radioInput = page.locator(`[name="${name}"][value="${match.value}"]`).first();
-          await radioInput.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+          await radioInput.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => { });
 
           const clicked = await radioInput.evaluate(input => {
             // 1. Workable: click the [data-ui="option"] ancestor
@@ -503,7 +504,7 @@ async function applyAnswers(page, answeredQuestions, log) {
           if (!clicked) {
             // Last resort: Playwright click on the wrapper
             await page.locator(`[data-ui="option"]:has([name="${name}"][value="${match.value}"])`).first()
-              .click({ timeout: 3000 }).catch(() => {});
+              .click({ timeout: 3000 }).catch(() => { });
           }
         }
 
@@ -511,7 +512,7 @@ async function applyAnswers(page, answeredQuestions, log) {
         const shouldCheck = /yes|true|agree|accept|i (do|am|have)/i.test(answer);
         const el = page.locator(sel).first();
         const isChecked = await el.isChecked().catch(() => false);
-        if (shouldCheck !== isChecked) await el.click().catch(() => {});
+        if (shouldCheck !== isChecked) await el.click().catch(() => { });
 
       } else {
         // text / number → humanType (fast); textarea → humanTypeCompose (thinking pauses)
@@ -555,7 +556,7 @@ async function clickButton(page, action, candidates, log = console.log) {
       const el = page.locator(sel).first();
       if (!(await el.isVisible({ timeout: 1500 }).catch(() => false))) continue;
       await el.click({ timeout: 5000 }).catch(() => el.evaluate(n => n.click()));
-      
+
       // Found a winner! Persist it.
       setSelector(hostname, action, sel);
       return true;
@@ -601,7 +602,7 @@ function waitForUserInput(prompt) {
 // opts.coverLetter  — full cover letter text (pre-generated) — overrides coverLineSuggestion
 // opts.preAnswers   — [{ question, answer }] pre-fetched by scrapeFormQuestions (skips mid-session AI scan)
 export async function applyToJob(url, tailoredCV, profile, opts = {}) {
-  const dryRun  = opts.dryRun  ?? false;
+  const dryRun = opts.dryRun ?? false;
   const verbose = opts.verbose ?? true;
   const log = (msg) => { if (verbose) console.log(`  ${msg}`); };
 
@@ -619,8 +620,9 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
 
     // ── Step 1: Navigate ──────────────────────
     log(`› Navigating to ${url}`);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await sleep(randomDelay(1200, 2200));
+    await page.goto(url, { waitUntil: "networkidle", timeout: 45000 });
+    // Extra wait for JS-heavy SPAs (Angular, React) to finish rendering
+    await page.waitForTimeout(2500);
     await screenshot(page, "01-loaded");
 
     // ── Step 2: Handle login wall ─────────────
@@ -642,28 +644,10 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
 
     // ── Step 3: Click Apply ───────────────────
     log("› Looking for Apply button...");
-    const clickedApply = await clickButton(page, "apply", [
-      'button:has-text("Apply Now")',
-      'button:has-text("Easy Apply")',
-      'button:has-text("Apply")',
-      'button:has-text("I\'m interested")',
-      'button:has-text("Interested")',
-      'a:has-text("Apply Now")',
-      'a:has-text("Apply")',
-      'a:has-text("I\'m interested")',
-      '[data-ui="apply-button"]',               // Workable
-      '[data-automation="job-detail-apply"]',   // Seek
-      '.jobs-apply-button',                     // LinkedIn
-      '#apply-button',
-      '[aria-label*="Apply"]',
-      '[data-cy="apply-button"]',               // Greenhouse
-    ], log);
-
-    if (!clickedApply) {
-      log("⚠  Could not find Apply button — check last_action.png");
-      await screenshot(page, "03-no-apply-btn");
-      return { success: false, reason: "apply_button_not_found" };
-    }
+    const clickedApply = await clickIntent(page, context, "apply", log);
+    if (!clickedApply) return { success: false, reason: "apply_button_not_found" };
+    // handle possible new page
+    if (clickedApply !== true && clickedApply !== page) page = clickedApply;
 
     await sleep(randomDelay(1500, 2500));
     await screenshot(page, "03-apply-form-open");
@@ -683,13 +667,13 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
     await fillWithDiscovery(page, "first_name", [
       'input[autocomplete="given-name"]',
       'input[name*="first_name" i]', 'input[name*="firstName" i]',
-      'input[id*="first-name" i]',   'input[placeholder*="first name" i]',
+      'input[id*="first-name" i]', 'input[placeholder*="first name" i]',
     ], pInfo.name?.split(" ")[0], host);
 
     await fillWithDiscovery(page, "last_name", [
       'input[autocomplete="family-name"]',
-      'input[name*="last_name" i]',  'input[name*="lastName" i]',
-      'input[id*="last-name" i]',    'input[placeholder*="last name" i]',
+      'input[name*="last_name" i]', 'input[name*="lastName" i]',
+      'input[id*="last-name" i]', 'input[placeholder*="last name" i]',
     ], pInfo.name?.split(" ").slice(1).join(" "), host);
 
     await fillWithDiscovery(page, "email", [
@@ -739,8 +723,8 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
 
     if (pInfo.github || pInfo.website) {
       await fillWithDiscovery(page, "github", [
-        'input[name*="github" i]',   'input[name*="portfolio" i]',
-        'input[name*="website" i]',  'input[id*="github" i]',
+        'input[name*="github" i]', 'input[name*="portfolio" i]',
+        'input[name*="website" i]', 'input[id*="github" i]',
         'input[placeholder*="github" i]', 'input[placeholder*="portfolio" i]',
         'input[aria-label*="github" i]', 'input[aria-label*="portfolio" i]',
       ], pInfo.github || pInfo.website, host);
@@ -759,7 +743,7 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
     }
 
     await fillField(page, [
-      'textarea[name*="cover" i]',   'textarea[id*="cover" i]',
+      'textarea[name*="cover" i]', 'textarea[id*="cover" i]',
       'textarea[placeholder*="cover" i]',
       'textarea[name*="message" i]', 'textarea[id*="message" i]',
       'textarea[name*="summary" i]', 'textarea[name*="letter" i]',
@@ -774,8 +758,9 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
     // on the first step and skip the AI call.  For subsequent steps (multi-page
     // forms) fall back to the normal mid-session scan.
     const preAnswers = opts.preAnswers ?? [];
-    const MAX_STEPS = 3;
-    for (let step = 1; step <= MAX_STEPS; step++) {
+    let step = 1;
+    let lastUrl = page.url();
+    while (true) {
       let answered;
 
       if (step === 1 && preAnswers.length) {
@@ -789,13 +774,17 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
         if (!extraQs.length) {
           log(`› No additional questions found on step ${step}`);
           // Still try to advance to next page
-          const clickedNext = await clickButton(page, "next", [
-            'button:has-text("Next")', 'button:has-text("Continue")',
-            'button[data-ui="next"]', 'button[data-action="next"]',
-            '[data-cy="next-step"]', 'button:has-text("Next Step")',
-            'a[role="button"]:has-text("Next")',
-          ], log);
+          const clickedNext = await clickIntent(page, context, "next", log);
           if (!clickedNext) break;
+
+          const newUrl = page.url();
+          if (newUrl === lastUrl) {
+            // if URL didn't change and no new fields after a short wait, break
+            await sleep(2000);
+            const newFields = await page.evaluate(scanFields);
+            if (newFields.length === 0) break;
+          }
+
           log(`› Multi-step form: advanced to step ${step + 1}`);
           await sleep(randomDelay(1500, 2500));
           await screenshot(page, `04${String.fromCharCode(96 + step)}-next-step`);
@@ -818,19 +807,22 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
       }
 
       // Advance to the next form page if a Next/Continue button exists
-      const clickedNext = await clickButton(page, "next", [
-        'button:has-text("Next")',
-        'button:has-text("Continue")',
-        'button[data-ui="next"]',
-        'button[data-action="next"]',
-        '[data-cy="next-step"]',
-        'button:has-text("Next Step")',
-        'a[role="button"]:has-text("Next")',
-      ], log);
+      const clickedNext = await clickIntent(page, context, "next", log);
 
       if (!clickedNext) break;   // No more steps — we're on the final page
 
-      log(`› Multi-step form: advanced to step ${step + 1}`);
+      const newUrl = page.url();
+      if (newUrl === lastUrl) {
+        // if URL didn't change and no new fields after a short wait, break
+        await sleep(2000);
+        const newFields = await page.evaluate(scanFields);
+        if (newFields.length === 0) break;
+      }
+
+      lastUrl = newUrl;
+      step++;
+
+      log(`› Multi-step form: advanced to step ${step}`);
       await sleep(randomDelay(1500, 2500));
       await screenshot(page, `04${String.fromCharCode(96 + step)}-next-step`);
     }
@@ -838,15 +830,15 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
     // ── Step 7: Upload documents ──────────────
     const resolvedResumePath = opts.resumePath
       ?? (opts.appDir ? (() => {
-          const f = fs.readdirSync(opts.appDir).find(f => f.endsWith("_CV.pdf"));
-          return f ? path.join(opts.appDir, f) : null;
-        })() : null);
+        const f = fs.readdirSync(opts.appDir).find(f => f.endsWith("_CV.pdf"));
+        return f ? path.join(opts.appDir, f) : null;
+      })() : null);
 
     const resolvedCoverPath = opts.coverLetterPath
       ?? (opts.appDir ? (() => {
-          const f = fs.readdirSync(opts.appDir).find(f => f.endsWith("_Cover-Letter.pdf"));
-          return f ? path.join(opts.appDir, f) : null;
-        })() : null);
+        const f = fs.readdirSync(opts.appDir).find(f => f.endsWith("_Cover-Letter.pdf"));
+        return f ? path.join(opts.appDir, f) : null;
+      })() : null);
 
     const host2 = new URL(url).hostname;
 
@@ -857,7 +849,7 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
           name => document.body.innerText.includes(name),
           path.basename(resolvedResumePath),
           { timeout: 8000 }
-        ).catch(() => {});
+        ).catch(() => { });
         await sleep(randomDelay(1000, 2000));
         log("✔ Resume uploaded");
         await screenshot(page, "05-resume-uploaded");
@@ -871,7 +863,7 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
           name => document.body.innerText.includes(name),
           path.basename(resolvedCoverPath),
           { timeout: 8000 }
-        ).catch(() => {});
+        ).catch(() => { });
         await sleep(randomDelay(1000, 2000));
         log("✔ Cover letter uploaded");
         await screenshot(page, "05-cover-uploaded");
@@ -929,7 +921,7 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
     return { success: true, confirmed, dryRun: false };
 
   } catch (err) {
-    await screenshot(page, "error").catch(() => {});
+    await screenshot(page, "error").catch(() => { });
     throw err;
   } finally {
     await sleep(1000);
