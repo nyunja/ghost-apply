@@ -220,6 +220,8 @@ async function fillField(page, candidates, value, compose = false) {
       const el = page.locator(sel).first();
       if (!(await el.isVisible({ timeout: 1500 }).catch(() => false))) continue;
 
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+
       // aria-hidden="true" inputs are backing stores for custom widgets —
       // set value via JS instead of trying to click them.
       const isAriaHidden = await el.evaluate(
@@ -393,6 +395,7 @@ async function uploadFile(page, fieldName, filePath, hostname, log) {
     try {
       const el = page.locator(sel).first();
       if (!(await el.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
       await el.setInputFiles(filePath);
       setSelector(hostname, fieldName, sel, "fields");
       log(`  › [HEURISTIC] Uploaded ${fieldName}. Learned: ${sel}`);
@@ -441,6 +444,7 @@ async function uploadFile(page, fieldName, filePath, hostname, log) {
   if (discovered) {
     try {
       const el = page.locator(discovered.sel).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
       await el.setInputFiles(filePath);
       setSelector(hostname, fieldName, discovered.sel, "fields");
       log(`  › [DISCOVERY] Uploaded ${fieldName} via label "${discovered.label}". Learned: ${discovered.sel}`);
@@ -518,6 +522,7 @@ async function applyAnswers(page, answeredQuestions, log) {
         // text / number → humanType (fast); textarea → humanTypeCompose (thinking pauses)
         const el = page.locator(sel).first();
         if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await el.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
           await (type === "textarea"
             ? humanTypeCompose(el, String(answer))
             : humanType(el, String(answer)));
@@ -792,7 +797,21 @@ export async function applyToJob(url, tailoredCV, profile, opts = {}) {
         }
         log(`› Found ${extraQs.length} additional question(s) on step ${step} — asking AI...`);
         try {
-          answered = await answerFormQuestions(extraQs, profile, tailoredCV);
+          const res = await answerFormQuestions(extraQs, profile, tailoredCV);
+          answered = res.questionResponses.mappedAnswers;
+          
+          // Save the responses for future reference and reuse
+          if (opts.appDir) {
+            const fs = await import("fs");
+            const responsesPath = path.join(opts.appDir, "application-responses.json");
+            let existing = { questionResponses: { responses: [], mappedAnswers: [] } };
+            if (fs.existsSync(responsesPath)) {
+              try { existing = JSON.parse(fs.readFileSync(responsesPath, "utf-8")); } catch {}
+            }
+            existing.questionResponses.responses.push(...res.questionResponses.responses);
+            existing.questionResponses.mappedAnswers.push(...res.questionResponses.mappedAnswers);
+            fs.writeFileSync(responsesPath, JSON.stringify(existing, null, 2));
+          }
         } catch (err) {
           log(`⚠  Additional questions failed: ${err.message?.split("\n")[0]}`);
         }
