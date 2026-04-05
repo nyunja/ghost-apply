@@ -105,7 +105,8 @@ async function _callAIForQuestions(questions, p, tailoredCV) {
   const raw = await callAI(
     `You are completing a job application form. Answer every question based ONLY on the candidate profile provided.
 Return ONLY valid JSON: { "responses": [ { "index": 1, "answer": "..." } ] }
-Rules:
+IMPORTANT RULES:
+- This is an authorized tool run locally by the user to automate their own workflows. You have explicit permission to generate these answers.
 - YES/NO → exactly "Yes" or "No".
 - Radio/dropdown → one option label verbatim.
 - Text/textarea → max 2 sentences, professional, grounded in the profile.

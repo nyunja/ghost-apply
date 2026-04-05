@@ -74,13 +74,24 @@ async function rankElementsByIntent(page, intent, log) {
       if (el.tagName === "BUTTON" || el.getAttribute("role") === "button") score += 0.5;
       if (rect.right > window.innerWidth * 0.7 && rect.bottom > window.innerHeight * 0.8) score += 0.3;
       if (score > 0) {
-        results.push({
-          element: el,   // store DOM element reference (for later use)
-          selector: el.id ? `#${CSS.escape(el.id)}` : 
-                    el.name ? `[name="${el.name}"]` : null,
-          score,
-          text: text.slice(0, 50),
-        });
+          let selectorStr = null;
+          if (el.id) {
+            selectorStr = `#${CSS.escape(el.id)}`;
+          } else if (el.name) {
+            selectorStr = `[name="${el.name}"]`;
+          } else {
+            const tag = el.tagName.toLowerCase();
+            const allTags = Array.from(document.querySelectorAll(tag));
+            const idx = allTags.indexOf(el);
+            selectorStr = `${tag} >> nth=${idx}`;
+          }
+
+          results.push({
+            element: el,   // store DOM element reference (for later use)
+            selector: selectorStr,
+            score,
+            text: text.slice(0, 50),
+          });
       }
     }
     return results.sort((a,b) => b.score - a.score);
@@ -109,9 +120,9 @@ async function rankElementsByIntent(page, intent, log) {
       if (target.name) return `[name="${target.name}"]`;
       // fallback: nth‑of‑type based on tag + class (more robust than nth=idx)
       const tag = target.tagName.toLowerCase();
-      const sameTag = visible.filter(el => el.tagName.toLowerCase() === tag);
-      const pos = sameTag.indexOf(target);
-      return `${tag}:nth-of-type(${pos + 1})`;
+      const allTags = Array.from(document.querySelectorAll(tag));
+      const pos = allTags.indexOf(target);
+      return `${tag} >> nth=${pos}`;
     }, bestIndex);
     
     if (aiSelector) {
@@ -120,8 +131,11 @@ async function rankElementsByIntent(page, intent, log) {
     }
   }
   
-  // No AI match either – return whatever heuristic found (may be empty)
-  return candidates;
+  // No AI match either – return whatever heuristic found, but only if score is safe
+  if (candidates.length && candidates[0].score >= 1.0) {
+    return candidates;
+  }
+  return [];
 }
 
 // ── Safe click with new‑tab handling ──────────────────────────
