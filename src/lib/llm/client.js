@@ -212,6 +212,9 @@ export function parseJSON(raw) {
     cleaned = cleaned.slice(start, end + 1);
   }
 
+  // Strip invalid trailing commas from arrays or objects
+  cleaned = cleaned.replace(/,\s*([\}\]])/g, '$1');
+
   try {
     return JSON.parse(cleaned);
   } catch (firstErr) {
