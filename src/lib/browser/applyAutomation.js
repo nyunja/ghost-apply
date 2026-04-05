@@ -409,7 +409,22 @@ async function uploadFile(page, fieldName, filePath, hostname, log) {
 
   const discovered = await page.evaluate(({ kws }) => {
     const getUploadLabel = el => {
-      // Check label[for], wrapping label, aria-label, surrounding text
+      // 1. Aria and explicit data attributes (crucial for React/Angular SPAs like Zoho)
+      const aria = el.getAttribute("aria-label");
+      if (aria) return aria.trim().toLowerCase();
+      
+      const attrs = [el.getAttribute("data-zcqa"), el.getAttribute("data-automation-id"), el.getAttribute("data-test-id")];
+      for (const a of attrs) {
+        if (a) return a.replace(/[-_]/g, " ").trim().toLowerCase();
+      }
+      
+      const parentData = el.closest('[data-zcqa],[data-automation-id]');
+      if (parentData) {
+        const a = parentData.getAttribute("data-zcqa") || parentData.getAttribute("data-automation-id");
+        if (a) return a.replace(/[-_]/g, " ").trim().toLowerCase();
+      }
+
+      // 2. DOM lookups
       if (el.id) {
         const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
         if (lbl) return lbl.innerText.trim().toLowerCase();

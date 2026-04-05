@@ -23,7 +23,7 @@ export function isStandardField(el) {
     ? el.getAttribute("autocomplete") 
     : el.autocomplete;
     
-  const hay = [el.name, el.id, el.placeholder, autocomplete]
+  const hay = [el.name, el.id, el.placeholder, autocomplete, el.label]
     .filter(Boolean).join(" ").toLowerCase();
   return SKIP_FIELDS.some(p => hay.includes(p));
 }
@@ -52,6 +52,22 @@ export function findClickableCandidates() {
  */
 export function scanFields() {
   const getLabel = el => {
+    // 1. Aria and explicit data attributes (crucial for React/Angular SPAs like Zoho)
+    const aria = el.getAttribute("aria-label");
+    if (aria) return aria.trim();
+    
+    const attrs = [el.getAttribute("data-zcqa"), el.getAttribute("data-automation-id"), el.getAttribute("data-test-id")];
+    for (const a of attrs) {
+      if (a) return a.replace(/[-_]/g, " ").trim();
+    }
+    
+    const parentData = el.closest('[data-zcqa],[data-automation-id]');
+    if (parentData) {
+      const a = parentData.getAttribute("data-zcqa") || parentData.getAttribute("data-automation-id");
+      if (a) return a.replace(/[-_]/g, " ").trim();
+    }
+
+    // 2. DOM lookups
     if (el.id) {
       const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (lbl) return lbl.innerText.trim();
@@ -67,6 +83,8 @@ export function scanFields() {
         if (t && !c.contains(el)) return t;
       }
     }
+    
+    // 3. Fallback to placeholder or generic attributes
     return el.placeholder || el.name || el.id || "(no label)";
   };
 
